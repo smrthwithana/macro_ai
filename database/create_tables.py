@@ -24,8 +24,10 @@ CREATE TABLE IF NOT EXISTS macro_data (
     id SERIAL PRIMARY KEY,
     country VARCHAR(50),
     indicator VARCHAR(100),
-    value FLOAT,
-    date DATE
+    value DOUBLE PRECISION,
+    record_date DATE,
+    source VARCHAR(100),
+    timestamp TIMESTAMP
 );
 """
 

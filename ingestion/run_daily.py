@@ -1,0 +1,16 @@
+from ingestion.market_ingestor import ingest_market_asset
+
+assets = [
+    ("^GSPC", "SP500"),
+    ("^IXIC", "NASDAQ"),
+    ("GC=F", "GOLD"),
+    ("CL=F", "OIL"),
+    ("EURUSD=X", "EURUSD"),
+    ("INR=X", "USDINR")
+]
+
+for symbol, asset_name in assets:
+    try:
+        ingest_market_asset(symbol, asset_name)
+    except Exception as e:
+        print(f"Error loading {asset_name}: {e}")
