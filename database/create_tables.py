@@ -1,14 +1,14 @@
-from sqlalchemy import create_engine, text
+import sys
+from pathlib import Path
 
-DB_USER = "postgres"
-DB_PASSWORD = "12345"
-DB_HOST = "localhost"
-DB_PORT = "5432"
-DB_NAME = "macro_ai"
+from sqlalchemy import text
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
-engine = create_engine(DATABASE_URL)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config.database import engine
 
 create_market_table = """
 CREATE TABLE IF NOT EXISTS market_data (

@@ -1,7 +1,21 @@
+# Environment and local config
+.env
+.env.*
+!.env.example
+
+# Virtual environments
 venv/
+.venv/
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+
+# IDE settings
 .idea/
+.vscode/
+
+# Logs
 logs/
 *.log
-.env
