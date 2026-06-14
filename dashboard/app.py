@@ -99,6 +99,22 @@ SELECT COUNT(*) AS row_count
 FROM macro_data;
 """
 
+market_signals_query = """
+SELECT
+    asset,
+    price,
+    daily_return,
+    weekly_return,
+    momentum,
+    volatility,
+    macro_gdp,
+    macro_cpi,
+    macro_interest_rate,
+    price_date
+FROM market_signals
+ORDER BY price_date DESC, asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -176,3 +192,75 @@ st.dataframe(selected_macro_df, width="stretch")
 
 st.subheader("All Latest Macro Data")
 st.dataframe(latest_macro_df, width="stretch")
+
+st.header("Market Signals")
+
+try:
+    market_signals_df = pd.read_sql(market_signals_query, engine)
+
+    if market_signals_df.empty:
+        st.info("No market signals available yet. Run scripts/build_market_signals.py first.")
+    else:
+        signal_asset = st.selectbox(
+            "Select Signal Asset",
+            market_signals_df["asset"].dropna().unique().tolist()
+        )
+
+        selected_signal_df = market_signals_df[
+            market_signals_df["asset"] == signal_asset
+        ]
+
+        latest_signal = selected_signal_df.iloc[0]
+
+        signal_col_1, signal_col_2, signal_col_3, signal_col_4 = st.columns(4)
+
+        with signal_col_1:
+            st.metric(
+                "Daily Return",
+                f"{latest_signal['daily_return']:.4f}"
+                if pd.notna(latest_signal["daily_return"])
+                else "N/A"
+            )
+
+        with signal_col_2:
+            st.metric(
+                "Weekly Return",
+                f"{latest_signal['weekly_return']:.4f}"
+                if pd.notna(latest_signal["weekly_return"])
+                else "N/A"
+            )
+
+        with signal_col_3:
+            st.metric(
+                "Momentum",
+                f"{latest_signal['momentum']:.4f}"
+                if pd.notna(latest_signal["momentum"])
+                else "N/A"
+            )
+
+        with signal_col_4:
+            st.metric(
+                "Volatility",
+                f"{latest_signal['volatility']:.4f}"
+                if pd.notna(latest_signal["volatility"])
+                else "N/A"
+            )
+
+        st.subheader("Macro Context for Signal Date")
+
+        macro_context_col_1, macro_context_col_2, macro_context_col_3 = st.columns(3)
+
+        with macro_context_col_1:
+            st.metric("GDP", f"{latest_signal['macro_gdp']:,.2f}")
+
+        with macro_context_col_2:
+            st.metric("CPI", f"{latest_signal['macro_cpi']:,.2f}")
+
+        with macro_context_col_3:
+            st.metric("Interest Rate", f"{latest_signal['macro_interest_rate']:,.2f}")
+
+        st.subheader("Signal Data")
+        st.dataframe(selected_signal_df, width="stretch")
+
+except Exception as e:
+    st.warning("Market signals table not found yet. Run the signal builder first.")
