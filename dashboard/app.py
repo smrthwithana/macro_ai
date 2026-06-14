@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from datetime import datetime
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT_DIR))
@@ -15,6 +16,21 @@ st.set_page_config(
 
 st.title("Macro AI Dashboard")
 st.write("Market data and macroeconomic data from PostgreSQL")
+
+with st.sidebar:
+    st.header("Dashboard Controls")
+
+    refresh_clicked = st.button("Refresh Data")
+
+    if refresh_clicked:
+        st.session_state["last_refresh_click"] = datetime.now()
+
+    if "last_refresh_click" in st.session_state:
+        st.success(
+            f"Dashboard refreshed at {st.session_state['last_refresh_click'].strftime('%H:%M:%S')}"
+        )
+
+    st.write("Use this dashboard to monitor market and macroeconomic data.")
 
 latest_market_query = """
 WITH ranked_market AS (
@@ -73,9 +89,39 @@ WHERE row_num = 1
 ORDER BY country, indicator;
 """
 
+market_count_query = """
+SELECT COUNT(*) AS row_count
+FROM market_data;
+"""
+
+macro_count_query = """
+SELECT COUNT(*) AS row_count
+FROM macro_data;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
+
+market_count = pd.read_sql(market_count_query, engine)["row_count"].iloc[0]
+macro_count = pd.read_sql(macro_count_query, engine)["row_count"].iloc[0]
+
+latest_market_update = latest_market_df["timestamp"].max()
+latest_macro_update = latest_macro_df["timestamp"].max()
+
+st.header("Database Summary")
+
+summary_col_1, summary_col_2, summary_col_3 = st.columns(3)
+
+with summary_col_1:
+    st.metric("Market Rows", market_count)
+
+with summary_col_2:
+    st.metric("Macro Rows", macro_count)
+
+with summary_col_3:
+    latest_update = max(latest_market_update, latest_macro_update)
+    st.metric("Last Updated", str(latest_update).split(".")[0])
 
 st.header("Latest Market Data")
 
@@ -88,19 +134,22 @@ for index, row in latest_market_df.iterrows():
             value=f"{row['price']:,.2f}"
         )
 
-st.dataframe(latest_market_df, use_container_width=True)
+selected_asset = st.selectbox(
+    "Select Asset",
+    latest_market_df["asset"].tolist()
+)
 
-st.header("Market Price History")
+selected_asset_history_df = market_history_df[
+    market_history_df["asset"] == selected_asset
+]
 
-if not market_history_df.empty:
-    chart_df = market_history_df.pivot_table(
-        index="timestamp",
-        columns="asset",
-        values="price",
-        aggfunc="last"
-    )
+st.subheader(f"{selected_asset} Price History")
 
+if not selected_asset_history_df.empty:
+    chart_df = selected_asset_history_df.set_index("timestamp")["price"]
     st.line_chart(chart_df)
+
+st.dataframe(latest_market_df, width="stretch")
 
 st.header("Latest Macroeconomic Data")
 
@@ -113,4 +162,17 @@ for index, row in latest_macro_df.iterrows():
             value=f"{row['value']:,.2f}"
         )
 
-st.dataframe(latest_macro_df, use_container_width=True)
+selected_macro_indicator = st.selectbox(
+    "Select Macro Indicator",
+    latest_macro_df["indicator"].tolist()
+)
+
+selected_macro_df = latest_macro_df[
+    latest_macro_df["indicator"] == selected_macro_indicator
+]
+
+st.subheader(f"{selected_macro_indicator} Latest Data")
+st.dataframe(selected_macro_df, width="stretch")
+
+st.subheader("All Latest Macro Data")
+st.dataframe(latest_macro_df, width="stretch")
