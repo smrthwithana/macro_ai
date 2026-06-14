@@ -115,6 +115,25 @@ FROM market_signals
 ORDER BY price_date DESC, asset;
 """
 
+rule_based_signals_query = """
+SELECT
+    asset,
+    price_date,
+    market_signal,
+    confidence,
+    rule_score,
+    reason,
+    daily_return,
+    weekly_return,
+    momentum,
+    volatility,
+    macro_gdp,
+    macro_cpi,
+    macro_interest_rate
+FROM rule_based_signals
+ORDER BY price_date DESC, asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -264,3 +283,62 @@ try:
 
 except Exception as e:
     st.warning("Market signals table not found yet. Run the signal builder first.")
+
+st.header("Rule-Based Market Intelligence")
+
+try:
+    rule_based_signals_df = pd.read_sql(rule_based_signals_query, engine)
+
+    if rule_based_signals_df.empty:
+        st.info("No rule-based signals available yet. Run scripts/build_rule_based_signals.py first.")
+    else:
+        rule_asset = st.selectbox(
+            "Select Rule-Based Signal Asset",
+            rule_based_signals_df["asset"].dropna().unique().tolist()
+        )
+
+        selected_rule_df = rule_based_signals_df[
+            rule_based_signals_df["asset"] == rule_asset
+        ]
+
+        latest_rule_signal = selected_rule_df.iloc[0]
+
+        rule_col_1, rule_col_2, rule_col_3 = st.columns(3)
+
+        with rule_col_1:
+            st.metric(
+                "Market Signal",
+                latest_rule_signal["market_signal"]
+            )
+
+        with rule_col_2:
+            st.metric(
+                "Confidence",
+                latest_rule_signal["confidence"]
+            )
+
+        with rule_col_3:
+            st.metric(
+                "Rule Score",
+                int(latest_rule_signal["rule_score"])
+            )
+
+        signal_value = latest_rule_signal["market_signal"]
+
+        if signal_value == "BULLISH":
+            st.success("The rule-based engine is currently bullish for this asset.")
+        elif signal_value == "BEARISH":
+            st.error("The rule-based engine is currently bearish for this asset.")
+        elif signal_value == "NEUTRAL":
+            st.warning("The rule-based engine is currently neutral for this asset.")
+        else:
+            st.info("There is not enough market history to generate a strong signal yet.")
+
+        st.subheader("Signal Explanation")
+        st.write(latest_rule_signal["reason"])
+
+        st.subheader("Rule-Based Signal Data")
+        st.dataframe(selected_rule_df, width="stretch")
+
+except Exception:
+    st.warning("Rule-based signals table not found yet. Run the rule-based signal builder first.")
