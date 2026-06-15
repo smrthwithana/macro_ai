@@ -147,6 +147,29 @@ FROM news_sentiment
 ORDER BY published_at DESC, related_asset;
 """
 
+combined_intelligence_query = """
+SELECT
+    asset,
+    price_date,
+    market_signal,
+    confidence,
+    sentiment_label,
+    sentiment_score,
+    combined_signal,
+    combined_confidence,
+    intelligence_summary,
+    headline,
+    daily_return,
+    weekly_return,
+    momentum,
+    volatility,
+    macro_gdp,
+    macro_cpi,
+    macro_interest_rate
+FROM combined_intelligence_signals
+ORDER BY price_date DESC, asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -412,3 +435,70 @@ try:
 
 except Exception:
     st.warning("News sentiment table not found yet. Run the news sentiment builder first.")
+
+st.header("Combined Market Intelligence")
+
+try:
+    combined_intelligence_df = pd.read_sql(combined_intelligence_query, engine)
+
+    if combined_intelligence_df.empty:
+        st.info("No combined intelligence data available yet. Run scripts/build_combined_intelligence.py first.")
+    else:
+        combined_asset = st.selectbox(
+            "Select Combined Intelligence Asset",
+            combined_intelligence_df["asset"].dropna().unique().tolist()
+        )
+
+        selected_combined_df = combined_intelligence_df[
+            combined_intelligence_df["asset"] == combined_asset
+        ]
+
+        latest_combined = selected_combined_df.iloc[0]
+
+        combined_col_1, combined_col_2, combined_col_3 = st.columns(3)
+
+        with combined_col_1:
+            st.metric(
+                "Combined Signal",
+                latest_combined["combined_signal"]
+            )
+
+        with combined_col_2:
+            st.metric(
+                "Combined Confidence",
+                latest_combined["combined_confidence"]
+            )
+
+        with combined_col_3:
+            st.metric(
+                "News Sentiment",
+                latest_combined["sentiment_label"]
+                if pd.notna(latest_combined["sentiment_label"])
+                else "UNKNOWN"
+            )
+
+        combined_signal_value = latest_combined["combined_signal"]
+
+        if combined_signal_value in ["STRONG_BULLISH", "BULLISH", "SLIGHTLY_BULLISH"]:
+            st.success("Combined intelligence is bullish for this asset.")
+        elif combined_signal_value in ["STRONG_BEARISH", "BEARISH", "SLIGHTLY_BEARISH"]:
+            st.error("Combined intelligence is bearish for this asset.")
+        elif combined_signal_value == "MIXED":
+            st.warning("Combined intelligence is mixed for this asset.")
+        else:
+            st.info("Combined intelligence is neutral or unclear.")
+
+        st.subheader("Intelligence Summary")
+        st.write(latest_combined["intelligence_summary"])
+
+        st.subheader("Related Headline")
+        if pd.notna(latest_combined["headline"]):
+            st.write(latest_combined["headline"])
+        else:
+            st.write("No related headline available yet.")
+
+        st.subheader("Combined Intelligence Data")
+        st.dataframe(selected_combined_df, width="stretch")
+
+except Exception:
+    st.warning("Combined intelligence table not found yet. Run the combined intelligence builder first.")
