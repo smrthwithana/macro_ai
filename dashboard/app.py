@@ -220,6 +220,42 @@ FROM prediction_ratings
 ORDER BY price_date DESC, asset;
 """
 
+backtest_summary_query = """
+SELECT
+    summary_type,
+    asset,
+    model_name,
+    total_trades,
+    winning_trades,
+    losing_trades,
+    flat_trades,
+    win_rate,
+    average_trade_return,
+    cumulative_return,
+    best_trade_return,
+    worst_trade_return,
+    created_at
+FROM backtest_summary
+ORDER BY summary_type DESC, asset;
+"""
+
+backtest_results_query = """
+SELECT
+    asset,
+    price_date,
+    next_price_date,
+    strategy_position,
+    actual_next_return,
+    strategy_return,
+    trade_result,
+    prediction_probability,
+    asset_cumulative_return,
+    overall_cumulative_return,
+    model_name
+FROM backtest_results
+ORDER BY price_date DESC, asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -713,3 +749,97 @@ try:
 
 except Exception:
     st.warning("Prediction ratings table not found yet. Run the prediction rating builder first.")
+
+st.header("Backtesting Performance")
+
+try:
+    backtest_summary_df = pd.read_sql(backtest_summary_query, engine)
+    backtest_results_df = pd.read_sql(backtest_results_query, engine)
+
+    if backtest_summary_df.empty or backtest_results_df.empty:
+        st.info("No backtest results available yet. Run scripts/build_backtest_results.py first.")
+    else:
+        overall_backtest_df = backtest_summary_df[
+            backtest_summary_df["summary_type"] == "OVERALL"
+        ]
+
+        asset_backtest_summary_df = backtest_summary_df[
+            backtest_summary_df["summary_type"] == "ASSET"
+        ]
+
+        overall_backtest = overall_backtest_df.iloc[0]
+
+        backtest_col_1, backtest_col_2, backtest_col_3, backtest_col_4 = st.columns(4)
+
+        with backtest_col_1:
+            st.metric(
+                "Total Return",
+                f"{overall_backtest['cumulative_return']:.2%}"
+            )
+
+        with backtest_col_2:
+            st.metric(
+                "Win Rate",
+                f"{overall_backtest['win_rate']:.2%}"
+            )
+
+        with backtest_col_3:
+            st.metric(
+                "Average Trade Return",
+                f"{overall_backtest['average_trade_return']:.4%}"
+            )
+
+        with backtest_col_4:
+            st.metric(
+                "Total Trades",
+                int(overall_backtest["total_trades"])
+            )
+
+        backtest_asset = st.selectbox(
+            "Select Backtest Asset",
+            asset_backtest_summary_df["asset"].dropna().unique().tolist()
+        )
+
+        selected_backtest_summary = asset_backtest_summary_df[
+            asset_backtest_summary_df["asset"] == backtest_asset
+        ].iloc[0]
+
+        selected_backtest_history_df = backtest_results_df[
+            backtest_results_df["asset"] == backtest_asset
+        ]
+
+        asset_backtest_col_1, asset_backtest_col_2, asset_backtest_col_3 = st.columns(3)
+
+        with asset_backtest_col_1:
+            st.metric(
+                "Asset Total Return",
+                f"{selected_backtest_summary['cumulative_return']:.2%}"
+            )
+
+        with asset_backtest_col_2:
+            st.metric(
+                "Asset Win Rate",
+                f"{selected_backtest_summary['win_rate']:.2%}"
+            )
+
+        with asset_backtest_col_3:
+            st.metric(
+                "Asset Avg Trade Return",
+                f"{selected_backtest_summary['average_trade_return']:.4%}"
+            )
+
+        if overall_backtest["cumulative_return"] > 0:
+            st.success("The backtest strategy is profitable over the tested period.")
+        elif overall_backtest["cumulative_return"] < 0:
+            st.error("The backtest strategy is losing over the tested period.")
+        else:
+            st.info("The backtest strategy is flat over the tested period.")
+
+        st.subheader("Asset-Wise Backtest Summary")
+        st.dataframe(asset_backtest_summary_df, width="stretch")
+
+        st.subheader("Backtest History")
+        st.dataframe(selected_backtest_history_df, width="stretch")
+
+except Exception:
+    st.warning("Backtest tables not found yet. Run the backtest builder first.")
