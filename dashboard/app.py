@@ -134,6 +134,19 @@ FROM rule_based_signals
 ORDER BY price_date DESC, asset;
 """
 
+news_sentiment_query = """
+SELECT
+    related_asset,
+    sentiment_label,
+    sentiment_score,
+    title,
+    source,
+    published_at,
+    created_at
+FROM news_sentiment
+ORDER BY published_at DESC, related_asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -342,3 +355,60 @@ try:
 
 except Exception:
     st.warning("Rule-based signals table not found yet. Run the rule-based signal builder first.")
+
+st.header("News Sentiment")
+
+try:
+    news_sentiment_df = pd.read_sql(news_sentiment_query, engine)
+
+    if news_sentiment_df.empty:
+        st.info("No news sentiment data available yet. Run scripts/build_news_sentiment.py first.")
+    else:
+        sentiment_asset = st.selectbox(
+            "Select Sentiment Asset",
+            news_sentiment_df["related_asset"].dropna().unique().tolist()
+        )
+
+        selected_sentiment_df = news_sentiment_df[
+            news_sentiment_df["related_asset"] == sentiment_asset
+        ]
+
+        latest_sentiment = selected_sentiment_df.iloc[0]
+
+        sentiment_col_1, sentiment_col_2, sentiment_col_3 = st.columns(3)
+
+        with sentiment_col_1:
+            st.metric(
+                "Sentiment Label",
+                latest_sentiment["sentiment_label"]
+            )
+
+        with sentiment_col_2:
+            st.metric(
+                "Sentiment Score",
+                int(latest_sentiment["sentiment_score"])
+            )
+
+        with sentiment_col_3:
+            st.metric(
+                "Source",
+                latest_sentiment["source"]
+            )
+
+        sentiment_value = latest_sentiment["sentiment_label"]
+
+        if sentiment_value == "POSITIVE":
+            st.success("News sentiment is positive for this asset.")
+        elif sentiment_value == "NEGATIVE":
+            st.error("News sentiment is negative for this asset.")
+        else:
+            st.warning("News sentiment is neutral for this asset.")
+
+        st.subheader("Latest Related Headline")
+        st.write(latest_sentiment["title"])
+
+        st.subheader("News Sentiment Data")
+        st.dataframe(selected_sentiment_df, width="stretch")
+
+except Exception:
+    st.warning("News sentiment table not found yet. Run the news sentiment builder first.")
