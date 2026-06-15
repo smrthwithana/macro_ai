@@ -185,6 +185,41 @@ FROM model_predictions
 ORDER BY price_date DESC, asset;
 """
 
+prediction_rating_summary_query = """
+SELECT
+    summary_type,
+    asset,
+    prediction_count,
+    lifetime_rating,
+    recent_30_rating,
+    overall_accuracy,
+    asset_wise_rating,
+    asset_wise_accuracy,
+    asset_recent_30_rating,
+    trust_status,
+    created_at
+FROM prediction_rating_summary
+ORDER BY summary_type DESC, asset;
+"""
+
+prediction_ratings_query = """
+SELECT
+    asset,
+    price_date,
+    target_direction,
+    predicted_direction,
+    prediction_probability,
+    prediction_correct,
+    confidence_bucket,
+    star_rating,
+    model_mood,
+    trust_impact,
+    reflection_message,
+    rating_created_at
+FROM prediction_ratings
+ORDER BY price_date DESC, asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -575,3 +610,106 @@ try:
 
 except Exception:
     st.warning("Model predictions table not found yet. Run the ML training script first.")
+
+st.header("Prediction Rating + Model Reflection")
+
+try:
+    prediction_rating_summary_df = pd.read_sql(prediction_rating_summary_query, engine)
+    prediction_ratings_df = pd.read_sql(prediction_ratings_query, engine)
+
+    if prediction_rating_summary_df.empty or prediction_ratings_df.empty:
+        st.info("No prediction ratings available yet. Run scripts/build_prediction_ratings.py first.")
+    else:
+        overall_rating_df = prediction_rating_summary_df[
+            prediction_rating_summary_df["summary_type"] == "OVERALL"
+        ]
+
+        asset_rating_summary_df = prediction_rating_summary_df[
+            prediction_rating_summary_df["summary_type"] == "ASSET"
+        ]
+
+        overall_rating = overall_rating_df.iloc[0]
+
+        rating_col_1, rating_col_2, rating_col_3, rating_col_4 = st.columns(4)
+
+        with rating_col_1:
+            st.metric(
+                "Lifetime Rating",
+                f"{overall_rating['lifetime_rating']:.2f} / 5"
+            )
+
+        with rating_col_2:
+            st.metric(
+                "Recent Rating",
+                f"{overall_rating['recent_30_rating']:.2f} / 5"
+            )
+
+        with rating_col_3:
+            st.metric(
+                "Overall Accuracy",
+                f"{overall_rating['overall_accuracy']:.2%}"
+            )
+
+        with rating_col_4:
+            st.metric(
+                "Trust Status",
+                str(overall_rating["trust_status"]).replace("_", " ")
+            )
+
+        rating_asset = st.selectbox(
+            "Select Rating Asset",
+            asset_rating_summary_df["asset"].dropna().unique().tolist()
+        )
+
+        selected_asset_summary = asset_rating_summary_df[
+            asset_rating_summary_df["asset"] == rating_asset
+        ].iloc[0]
+
+        selected_asset_ratings_df = prediction_ratings_df[
+            prediction_ratings_df["asset"] == rating_asset
+        ]
+
+        latest_rating = selected_asset_ratings_df.iloc[0]
+
+        asset_rating_col_1, asset_rating_col_2, asset_rating_col_3 = st.columns(3)
+
+        with asset_rating_col_1:
+            st.metric(
+                "Asset Rating",
+                f"{selected_asset_summary['asset_wise_rating']:.2f} / 5"
+            )
+
+        with asset_rating_col_2:
+            st.metric(
+                "Asset Accuracy",
+                f"{selected_asset_summary['asset_wise_accuracy']:.2%}"
+            )
+
+        with asset_rating_col_3:
+            st.metric(
+                "Model Mood",
+                latest_rating["model_mood"]
+            )
+
+        trust_impact = latest_rating["trust_impact"]
+
+        if trust_impact == "TRUST_INCREASING":
+            st.success("The latest rated prediction increased model trust.")
+        elif trust_impact == "TRUST_STABLE":
+            st.info("The latest rated prediction kept model trust stable.")
+        elif trust_impact == "TRUST_DECREASING":
+            st.warning("The latest rated prediction reduced model trust.")
+        else:
+            st.error("The latest rated prediction needs review.")
+
+        st.subheader("Latest Model Reflection")
+        st.write(latest_rating["reflection_message"])
+
+        st.subheader("Asset Rating Summary")
+        st.dataframe(asset_rating_summary_df, width="stretch")
+
+        st.subheader("Prediction Rating History")
+        st.dataframe(selected_asset_ratings_df, width="stretch")
+
+except Exception:
+    st.warning("Prediction ratings table not found yet. Run the prediction rating builder first.")
