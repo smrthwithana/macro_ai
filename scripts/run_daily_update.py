@@ -13,7 +13,7 @@ tasks = [
     ("Rule-based signals build", "scripts.build_rule_based_signals"),
     ("Combined intelligence build", "scripts.build_combined_intelligence"),
     ("Model dataset build", "scripts.build_model_dataset"),
-    ("Direction model training", "scripts.train_direction_model"),
+    ("Direction model comparison training", "scripts.train_direction_model"),
     ("Prediction ratings build", "scripts.build_prediction_ratings"),
     ("Backtest results build", "scripts.build_backtest_results")
 ]

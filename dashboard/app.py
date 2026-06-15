@@ -185,6 +185,22 @@ FROM model_predictions
 ORDER BY price_date DESC, asset;
 """
 
+model_performance_query = """
+SELECT
+    model_name,
+    is_best_model,
+    train_rows,
+    test_rows,
+    accuracy,
+    precision_score,
+    recall_score,
+    f1_score,
+    classification_report,
+    created_at
+FROM model_performance_summary
+ORDER BY is_best_model DESC, accuracy DESC, f1_score DESC;
+"""
+
 prediction_rating_summary_query = """
 SELECT
     summary_type,
@@ -646,6 +662,66 @@ try:
 
 except Exception:
     st.warning("Model predictions table not found yet. Run the ML training script first.")
+
+st.header("Model Comparison")
+
+try:
+    model_performance_df = pd.read_sql(model_performance_query, engine)
+
+    if model_performance_df.empty:
+        st.info("No model comparison available yet. Run scripts/train_direction_model.py first.")
+    else:
+        best_model = model_performance_df[
+            model_performance_df["is_best_model"] == True
+        ].iloc[0]
+
+        comparison_col_1, comparison_col_2, comparison_col_3, comparison_col_4 = st.columns(4)
+
+        with comparison_col_1:
+            st.metric(
+                "Best Model",
+                best_model["model_name"]
+            )
+
+        with comparison_col_2:
+            st.metric(
+                "Best Accuracy",
+                f"{best_model['accuracy']:.2%}"
+            )
+
+        with comparison_col_3:
+            st.metric(
+                "Best F1 Score",
+                f"{best_model['f1_score']:.2%}"
+            )
+
+        with comparison_col_4:
+            st.metric(
+                "Test Rows",
+                int(best_model["test_rows"])
+            )
+
+        model_performance_display_df = model_performance_df[
+            [
+                "model_name",
+                "is_best_model",
+                "accuracy",
+                "precision_score",
+                "recall_score",
+                "f1_score",
+                "test_rows",
+            ]
+        ].copy()
+
+        st.subheader("Model Performance Summary")
+        st.write(f"Models compared: {', '.join(model_performance_df['model_name'].tolist())}")
+        st.table(model_performance_display_df)
+
+        st.subheader("Best Model Classification Report")
+        st.text(best_model["classification_report"])
+
+except Exception:
+    st.warning("Model performance table not found yet. Run the model training script first.")
 
 st.header("Prediction Rating + Model Reflection")
 
