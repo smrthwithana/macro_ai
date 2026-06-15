@@ -8,6 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 tasks = [
     ("Market data ingestion", "ingestion.run_daily"),
     ("FRED macro ingestion", "ingestion.run_fred_macro_daily"),
+    ("Real news sentiment fetch", "scripts.fetch_real_news_sentiment"),
     ("Market signals build", "scripts.build_market_signals"),
     ("Rule-based signals build", "scripts.build_rule_based_signals"),
     ("Combined intelligence build", "scripts.build_combined_intelligence")
