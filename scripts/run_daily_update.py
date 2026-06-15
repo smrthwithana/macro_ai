@@ -11,7 +11,9 @@ tasks = [
     ("Real news sentiment fetch", "scripts.fetch_real_news_sentiment"),
     ("Market signals build", "scripts.build_market_signals"),
     ("Rule-based signals build", "scripts.build_rule_based_signals"),
-    ("Combined intelligence build", "scripts.build_combined_intelligence")
+    ("Combined intelligence build", "scripts.build_combined_intelligence"),
+    ("Model dataset build", "scripts.build_model_dataset"),
+    ("Direction model training", "scripts.train_direction_model")
 ]
 
 

@@ -170,6 +170,21 @@ FROM combined_intelligence_signals
 ORDER BY price_date DESC, asset;
 """
 
+model_predictions_query = """
+SELECT
+    asset,
+    price_date,
+    price,
+    target_direction,
+    predicted_direction,
+    prediction_probability,
+    model_name,
+    model_accuracy,
+    created_at
+FROM model_predictions
+ORDER BY price_date DESC, asset;
+"""
+
 latest_market_df = pd.read_sql(latest_market_query, engine)
 market_history_df = pd.read_sql(market_history_query, engine)
 latest_macro_df = pd.read_sql(latest_macro_query, engine)
@@ -502,3 +517,61 @@ try:
 
 except Exception:
     st.warning("Combined intelligence table not found yet. Run the combined intelligence builder first.")
+
+st.header("ML Direction Predictions")
+
+try:
+    model_predictions_df = pd.read_sql(model_predictions_query, engine)
+
+    if model_predictions_df.empty:
+        st.info("No ML predictions available yet. Run scripts/train_direction_model.py first.")
+    else:
+        prediction_asset = st.selectbox(
+            "Select Prediction Asset",
+            model_predictions_df["asset"].dropna().unique().tolist()
+        )
+
+        selected_prediction_df = model_predictions_df[
+            model_predictions_df["asset"] == prediction_asset
+        ]
+
+        latest_prediction = selected_prediction_df.iloc[0]
+
+        predicted_direction = int(latest_prediction["predicted_direction"])
+
+        prediction_label = "UP" if predicted_direction == 1 else "DOWN"
+
+        prediction_col_1, prediction_col_2, prediction_col_3 = st.columns(3)
+
+        with prediction_col_1:
+            st.metric(
+                "Predicted Next Direction",
+                prediction_label
+            )
+
+        with prediction_col_2:
+            st.metric(
+                "Prediction Probability",
+                f"{latest_prediction['prediction_probability']:.2%}"
+            )
+
+        with prediction_col_3:
+            st.metric(
+                "Model Accuracy",
+                f"{latest_prediction['model_accuracy']:.2%}"
+            )
+
+        if predicted_direction == 1:
+            st.success("The ML model predicts this asset may move up on the next available market date.")
+        else:
+            st.error("The ML model predicts this asset may move down or stay flat on the next available market date.")
+
+        st.subheader("Prediction Details")
+        st.write(f"Model used: {latest_prediction['model_name']}")
+        st.write(f"Prediction date: {latest_prediction['price_date']}")
+
+        st.subheader("Prediction History")
+        st.dataframe(selected_prediction_df, width="stretch")
+
+except Exception:
+    st.warning("Model predictions table not found yet. Run the ML training script first.")
