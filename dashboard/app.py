@@ -16,6 +16,24 @@ st.set_page_config(
 
 st.title("Macro AI Dashboard")
 st.write("Market data and macroeconomic data from PostgreSQL")
+st.warning(
+    "Research and learning tool only. This dashboard is not guaranteed financial advice "
+    "and should not be used as the sole basis for trading or investment decisions."
+)
+
+with st.expander("Dashboard Guide", expanded=False):
+    st.markdown(
+        """
+        - **Prediction direction** shows whether the model expects the next available market move to be up or down.
+        - **Prediction probability** is the model's confidence for an upward move. Values near 50% are uncertain.
+        - **Trust status** summarizes long-term model reliability from historical prediction ratings.
+        - **Model mood** translates recent prediction quality into a readable state such as CAUTIOUS or CONCERNED.
+        - **Reflection message** explains what the model got right or wrong and how that affects trust.
+        - **Backtest return** simulates a simple long/short strategy based on predicted direction.
+        - **Win rate** shows how often the simulated strategy produced a positive trade result.
+        - **Model comparison** shows which ML model performed best on the time-based test split.
+        """
+    )
 
 with st.sidebar:
     st.header("Dashboard Controls")
@@ -315,6 +333,7 @@ with summary_col_3:
     st.metric("Last Updated", str(latest_update).split(".")[0])
 
 st.header("Latest Market Data")
+st.caption("Latest stored prices for each tracked asset, pulled from PostgreSQL after market ingestion.")
 
 market_cols = st.columns(len(latest_market_df))
 
@@ -343,6 +362,7 @@ if not selected_asset_history_df.empty:
 st.dataframe(latest_market_df, width="stretch")
 
 st.header("Latest Macroeconomic Data")
+st.caption("Most recent macro indicators stored from FRED, used as economic context for signals and models.")
 
 macro_cols = st.columns(len(latest_macro_df))
 
@@ -500,6 +520,7 @@ except Exception:
     st.warning("Rule-based signals table not found yet. Run the rule-based signal builder first.")
 
 st.header("News Sentiment")
+st.caption("Individual news headlines scored with a simple positive, negative, or neutral sentiment rule.")
 
 try:
     news_sentiment_df = pd.read_sql(news_sentiment_query, engine)
@@ -557,6 +578,7 @@ except Exception:
     st.warning("News sentiment table not found yet. Run the news sentiment builder first.")
 
 st.header("News Sentiment Summary")
+st.caption("Recent headlines are grouped by asset to create a cleaner sentiment picture for combined intelligence.")
 
 try:
     news_sentiment_summary_df = pd.read_sql(news_sentiment_summary_query, engine)
@@ -622,6 +644,7 @@ except Exception:
     st.warning("News sentiment summary table not found yet. Run the news sentiment summary builder first.")
 
 st.header("Combined Market Intelligence")
+st.caption("Rule-based market signals are combined with summarized news sentiment to create explainable market intelligence.")
 
 try:
     combined_intelligence_df = pd.read_sql(combined_intelligence_query, engine)
@@ -689,6 +712,7 @@ except Exception:
     st.warning("Combined intelligence table not found yet. Run the combined intelligence builder first.")
 
 st.header("ML Direction Predictions")
+st.caption("Baseline machine learning predictions estimate whether each asset may move up on the next available market date.")
 
 try:
     model_predictions_df = pd.read_sql(model_predictions_query, engine)
@@ -747,6 +771,7 @@ except Exception:
     st.warning("Model predictions table not found yet. Run the ML training script first.")
 
 st.header("Model Comparison")
+st.caption("Compares logistic regression against a second model using the same time-based train/test split.")
 
 try:
     model_performance_df = pd.read_sql(model_performance_query, engine)
@@ -807,6 +832,7 @@ except Exception:
     st.warning("Model performance table not found yet. Run the model training script first.")
 
 st.header("Prediction Rating + Model Reflection")
+st.caption("Historical predictions are scored, rated, and translated into model mood, trust impact, and reflection messages.")
 
 try:
     prediction_rating_summary_df = pd.read_sql(prediction_rating_summary_query, engine)
@@ -910,6 +936,7 @@ except Exception:
     st.warning("Prediction ratings table not found yet. Run the prediction rating builder first.")
 
 st.header("Backtesting Performance")
+st.caption("Simulates a simple long/short strategy using the model's predicted direction and realized next return.")
 
 try:
     backtest_summary_df = pd.read_sql(backtest_summary_query, engine)
