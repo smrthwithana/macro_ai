@@ -16,6 +16,15 @@ st.set_page_config(
 )
 
 
+SIMPLE_MARKET_ASSETS = ["SP500", "NASDAQ", "GOLD", "OIL", "EURUSD", "USDINR"]
+
+BULLISH_SIMPLE_SIGNALS = {"STRONG_BULLISH", "BULLISH"}
+BEARISH_SIMPLE_SIGNALS = {"STRONG_BEARISH", "BEARISH"}
+LOW_TRUST_STATUSES = {"LOW_TRUST_NEEDS_IMPROVEMENT"}
+LOW_CONFIDENCE_LABELS = {"LOW", "INSUFFICIENT_DATA"}
+WEAK_PROBABILITY_DISTANCE = 0.10
+
+
 latest_market_query = """
 WITH ranked_market AS (
     SELECT
@@ -274,9 +283,371 @@ FROM backtest_results
 ORDER BY price_date DESC, asset;
 """
 
+simple_model_predictions_query = """
+WITH ranked_predictions AS (
+    SELECT
+        asset,
+        price_date,
+        price,
+        predicted_direction,
+        prediction_probability,
+        model_name,
+        model_accuracy,
+        created_at,
+        ROW_NUMBER() OVER (
+            PARTITION BY asset
+            ORDER BY price_date DESC, created_at DESC
+        ) AS row_num
+    FROM model_predictions
+)
+SELECT
+    asset,
+    price_date,
+    price,
+    predicted_direction,
+    prediction_probability,
+    model_name,
+    model_accuracy,
+    created_at
+FROM ranked_predictions
+WHERE row_num = 1
+ORDER BY asset;
+"""
+
+simple_combined_intelligence_query = """
+WITH ranked_intelligence AS (
+    SELECT
+        asset,
+        price_date,
+        price,
+        combined_signal,
+        combined_confidence,
+        sentiment_label,
+        sentiment_score,
+        intelligence_summary,
+        ROW_NUMBER() OVER (
+            PARTITION BY asset
+            ORDER BY price_date DESC
+        ) AS row_num
+    FROM combined_intelligence_signals
+)
+SELECT
+    asset,
+    price_date,
+    price,
+    combined_signal,
+    combined_confidence,
+    sentiment_label,
+    sentiment_score,
+    intelligence_summary
+FROM ranked_intelligence
+WHERE row_num = 1
+ORDER BY asset;
+"""
+
+simple_prediction_rating_summary_query = """
+SELECT
+    summary_type,
+    asset,
+    prediction_count,
+    asset_wise_rating,
+    asset_wise_accuracy,
+    asset_recent_30_rating,
+    trust_status,
+    created_at
+FROM prediction_rating_summary
+WHERE summary_type IN ('ASSET', 'OVERALL')
+ORDER BY summary_type DESC, asset;
+"""
+
+simple_backtest_summary_query = """
+SELECT
+    summary_type,
+    asset,
+    total_trades,
+    win_rate,
+    average_trade_return,
+    cumulative_return,
+    created_at
+FROM backtest_summary
+WHERE summary_type IN ('ASSET', 'OVERALL')
+ORDER BY summary_type DESC, asset;
+"""
+
+simple_news_sentiment_summary_query = """
+SELECT
+    related_asset,
+    headline_count,
+    average_sentiment_score,
+    dominant_sentiment_label,
+    latest_headline,
+    latest_source,
+    latest_published_date,
+    created_at
+FROM news_sentiment_summary
+ORDER BY related_asset;
+"""
+
 
 def read_sql(query):
     return pd.read_sql(query, engine)
+
+
+def read_optional_sql(query, unavailable_message):
+    try:
+        return read_sql(query)
+    except Exception:
+        st.info(unavailable_message)
+        return pd.DataFrame()
+
+
+def latest_rows_by_asset(df, asset_column="asset"):
+    if df.empty or asset_column not in df.columns:
+        return {}
+
+    asset_rows = {}
+
+    for _, row in df.iterrows():
+        asset = row.get(asset_column)
+
+        if pd.notna(asset):
+            asset_rows[str(asset)] = row
+
+    return asset_rows
+
+
+def rating_rows_by_asset(df):
+    if df.empty:
+        return {}, None
+
+    asset_df = df[df["summary_type"] == "ASSET"]
+    overall_df = df[df["summary_type"] == "OVERALL"]
+    asset_rows = latest_rows_by_asset(asset_df)
+    overall_row = overall_df.iloc[0] if not overall_df.empty else None
+
+    return asset_rows, overall_row
+
+
+def normalize_label(value, default="UNKNOWN"):
+    if pd.isna(value):
+        return default
+
+    return str(value).strip().upper()
+
+
+def readable_label(value):
+    label = normalize_label(value, "N/A")
+
+    if label == "N/A":
+        return label
+
+    return label.replace("_", " ")
+
+
+def format_price(value):
+    if pd.isna(value):
+        return "N/A"
+
+    return f"{float(value):,.2f}"
+
+
+def format_percent(value):
+    if pd.isna(value):
+        return "N/A"
+
+    return f"{float(value):.2%}"
+
+
+def get_first_available(row_options, column_name):
+    for row in row_options:
+        if row is not None and column_name in row and pd.notna(row[column_name]):
+            return row[column_name]
+
+    return None
+
+
+def prediction_direction(row):
+    if row is None or pd.isna(row.get("predicted_direction")):
+        return None
+
+    return "UP" if int(row["predicted_direction"]) == 1 else "DOWN"
+
+
+def probability_is_weak(probability):
+    if pd.isna(probability):
+        return True
+
+    return abs(float(probability) - 0.5) < WEAK_PROBABILITY_DISTANCE
+
+
+def build_simple_market_decision(
+    asset,
+    market_row,
+    prediction_row,
+    combined_row,
+    rating_row,
+    overall_rating_row,
+    backtest_row,
+    sentiment_row,
+):
+    ml_direction = prediction_direction(prediction_row)
+    probability = get_first_available([prediction_row], "prediction_probability")
+    combined_signal = normalize_label(
+        get_first_available([combined_row], "combined_signal")
+    )
+    combined_confidence = normalize_label(
+        get_first_available([combined_row], "combined_confidence")
+    )
+    trust_status = normalize_label(
+        get_first_available([rating_row, overall_rating_row], "trust_status")
+    )
+    sentiment_label = normalize_label(
+        get_first_available([sentiment_row, combined_row], "dominant_sentiment_label")
+    )
+
+    if sentiment_label == "UNKNOWN":
+        sentiment_label = normalize_label(
+            get_first_available([combined_row], "sentiment_label")
+        )
+
+    backtest_win_rate = get_first_available([backtest_row], "win_rate")
+    price = get_first_available([market_row, prediction_row, combined_row], "price")
+
+    caution_reasons = []
+
+    if ml_direction is None:
+        caution_reasons.append("ML prediction is not available")
+
+    if combined_signal == "UNKNOWN":
+        caution_reasons.append("combined signal is not available")
+
+    if trust_status in LOW_TRUST_STATUSES:
+        caution_reasons.append("model trust is low")
+
+    if probability_is_weak(probability):
+        caution_reasons.append("ML probability is close to 50%")
+
+    if combined_confidence in LOW_CONFIDENCE_LABELS:
+        caution_reasons.append("combined confidence is low")
+
+    if combined_signal in {"MIXED", "NEUTRAL", "INSUFFICIENT_DATA"}:
+        caution_reasons.append("signals are mixed or unclear")
+
+    if pd.notna(backtest_win_rate) and float(backtest_win_rate) < 0.45:
+        caution_reasons.append("recent backtest win rate is weak")
+
+    if (
+        ml_direction == "UP"
+        and combined_signal in BEARISH_SIMPLE_SIGNALS
+        or ml_direction == "DOWN"
+        and combined_signal in BULLISH_SIMPLE_SIGNALS
+    ):
+        caution_reasons.append("ML and combined signals conflict")
+
+    if ml_direction == "UP" and sentiment_label == "NEGATIVE":
+        caution_reasons.append("news sentiment is negative")
+
+    if ml_direction == "DOWN" and sentiment_label == "POSITIVE":
+        caution_reasons.append("news sentiment is positive")
+
+    if caution_reasons:
+        return {
+            "asset": asset,
+            "direction": "WAIT / MIXED",
+            "tone": "warning",
+            "price": price,
+            "ml_probability": probability,
+            "trust_status": trust_status,
+            "combined_signal": combined_signal,
+            "sentiment_label": sentiment_label,
+            "backtest_win_rate": backtest_win_rate,
+            "explanation": "Signals are mixed, confidence is weak, or trust needs caution, so waiting is safer.",
+            "details": "; ".join(caution_reasons),
+        }
+
+    if ml_direction == "UP" and combined_signal in BULLISH_SIMPLE_SIGNALS:
+        return {
+            "asset": asset,
+            "direction": "LIKELY UP",
+            "tone": "success",
+            "price": price,
+            "ml_probability": probability,
+            "trust_status": trust_status,
+            "combined_signal": combined_signal,
+            "sentiment_label": sentiment_label,
+            "backtest_win_rate": backtest_win_rate,
+            "explanation": "The model and signals mostly agree that this asset may move up.",
+            "details": "ML direction is UP and combined intelligence is bullish.",
+        }
+
+    if ml_direction == "DOWN" and combined_signal in BEARISH_SIMPLE_SIGNALS:
+        return {
+            "asset": asset,
+            "direction": "LIKELY DOWN",
+            "tone": "error",
+            "price": price,
+            "ml_probability": probability,
+            "trust_status": trust_status,
+            "combined_signal": combined_signal,
+            "sentiment_label": sentiment_label,
+            "backtest_win_rate": backtest_win_rate,
+            "explanation": "The model and signals mostly agree that this asset may move down.",
+            "details": "ML direction is DOWN and combined intelligence is bearish.",
+        }
+
+    return {
+        "asset": asset,
+        "direction": "WAIT / MIXED",
+        "tone": "warning",
+        "price": price,
+        "ml_probability": probability,
+        "trust_status": trust_status,
+        "combined_signal": combined_signal,
+        "sentiment_label": sentiment_label,
+        "backtest_win_rate": backtest_win_rate,
+        "explanation": "Signals are mixed, so waiting is safer.",
+        "details": "The available signals do not line up strongly enough for a simple up or down view.",
+    }
+
+
+def render_simple_market_card(decision):
+    with st.container(border=True):
+        st.subheader(decision["asset"])
+
+        if decision["tone"] == "success":
+            st.success(decision["direction"])
+        elif decision["tone"] == "error":
+            st.error(decision["direction"])
+        else:
+            st.warning(decision["direction"])
+
+        metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
+
+        with metric_col_1:
+            st.metric("Latest Price", format_price(decision["price"]))
+
+        with metric_col_2:
+            st.metric("ML Probability", format_percent(decision["ml_probability"]))
+
+        with metric_col_3:
+            st.metric("Model Trust", readable_label(decision["trust_status"]))
+
+        with metric_col_4:
+            st.metric("Backtest Win Rate", format_percent(decision["backtest_win_rate"]))
+
+        context_col_1, context_col_2 = st.columns(2)
+
+        with context_col_1:
+            st.write(f"Combined signal: **{readable_label(decision['combined_signal'])}**")
+
+        with context_col_2:
+            st.write(f"News sentiment: **{readable_label(decision['sentiment_label'])}**")
+
+        st.write(decision["explanation"])
+        st.caption(f"Why: {decision['details']}")
+        st.caption(
+            "Research tool only. This simple view is not guaranteed financial advice."
+        )
 
 
 def show_intro():
@@ -302,6 +673,104 @@ def show_dashboard_guide():
         - **Model comparison** shows which ML model performed best on the time-based test split.
         """
     )
+
+
+def show_simple_market_view():
+    st.header("Simple Market View")
+    st.write(
+        "Simple Market View converts the advanced model, sentiment, and signal outputs into beginner-friendly green/red/yellow cards."
+    )
+    st.warning(
+        "Research and learning tool only. These cards are not guaranteed financial advice "
+        "and should not be used as the sole basis for trading or investment decisions."
+    )
+
+    latest_market_df = read_optional_sql(
+        latest_market_query,
+        "Latest market prices are not available yet. Run the market ingestion first.",
+    )
+    model_predictions_df = read_optional_sql(
+        simple_model_predictions_query,
+        "Latest ML predictions are not available yet. Run scripts/train_direction_model.py first.",
+    )
+    combined_intelligence_df = read_optional_sql(
+        simple_combined_intelligence_query,
+        "Combined intelligence signals are not available yet. Run scripts/build_combined_intelligence.py first.",
+    )
+    prediction_rating_summary_df = read_optional_sql(
+        simple_prediction_rating_summary_query,
+        "Prediction trust ratings are not available yet. Run scripts/build_prediction_ratings.py first.",
+    )
+    backtest_summary_df = read_optional_sql(
+        simple_backtest_summary_query,
+        "Backtest summary is not available yet. Run scripts/build_backtest_results.py first.",
+    )
+    news_sentiment_summary_df = read_optional_sql(
+        simple_news_sentiment_summary_query,
+        "News sentiment summary is not available yet. Run scripts/build_news_sentiment_summary.py first.",
+    )
+
+    market_rows = latest_rows_by_asset(latest_market_df)
+    prediction_rows = latest_rows_by_asset(model_predictions_df)
+    combined_rows = latest_rows_by_asset(combined_intelligence_df)
+    rating_rows, overall_rating_row = rating_rows_by_asset(prediction_rating_summary_df)
+    backtest_rows = latest_rows_by_asset(
+        backtest_summary_df[backtest_summary_df["summary_type"] == "ASSET"]
+        if not backtest_summary_df.empty
+        else backtest_summary_df
+    )
+    sentiment_rows = latest_rows_by_asset(news_sentiment_summary_df, "related_asset")
+
+    available_assets = set(SIMPLE_MARKET_ASSETS)
+
+    for rows in [
+        market_rows,
+        prediction_rows,
+        combined_rows,
+        rating_rows,
+        backtest_rows,
+        sentiment_rows,
+    ]:
+        available_assets.update(rows.keys())
+
+    ordered_assets = SIMPLE_MARKET_ASSETS + sorted(
+        asset for asset in available_assets if asset not in SIMPLE_MARKET_ASSETS
+    )
+
+    if not any(
+        [
+            market_rows,
+            prediction_rows,
+            combined_rows,
+            rating_rows,
+            backtest_rows,
+            sentiment_rows,
+        ]
+    ):
+        st.warning("No simple market inputs are available yet. Run the daily update first.")
+        return
+
+    st.caption(
+        "Green means the ML model and combined signal agree upward. Red means they agree downward. "
+        "Yellow means the inputs conflict, confidence is weak, or trust needs caution."
+    )
+
+    for row_start in range(0, len(ordered_assets), 2):
+        card_cols = st.columns(2)
+
+        for col_index, asset in enumerate(ordered_assets[row_start:row_start + 2]):
+            with card_cols[col_index]:
+                decision = build_simple_market_decision(
+                    asset,
+                    market_rows.get(asset),
+                    prediction_rows.get(asset),
+                    combined_rows.get(asset),
+                    rating_rows.get(asset),
+                    overall_rating_row,
+                    backtest_rows.get(asset),
+                    sentiment_rows.get(asset),
+                )
+                render_simple_market_card(decision)
 
 
 def show_overview():
@@ -976,6 +1445,7 @@ with st.sidebar:
         "Navigation",
         [
             "Overview",
+            "Simple Market View",
             "Market Data",
             "Macro Data",
             "News Sentiment",
@@ -1004,6 +1474,8 @@ show_intro()
 
 if page == "Overview":
     show_overview()
+elif page == "Simple Market View":
+    show_simple_market_view()
 elif page == "Market Data":
     show_market_data()
 elif page == "Macro Data":
