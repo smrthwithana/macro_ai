@@ -6,6 +6,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT_DIR))
 
 import pandas as pd
+from sqlalchemy import inspect
 from config.database import engine
 
 
@@ -72,7 +73,38 @@ def combine_signal(row):
     )
 
 
-query = """
+summary_query = """
+SELECT
+    r.asset,
+    r.price,
+    r.price_date,
+    r.market_signal,
+    r.confidence,
+    r.rule_score,
+    r.reason,
+    r.daily_return,
+    r.weekly_return,
+    r.momentum,
+    r.volatility,
+    r.macro_gdp,
+    r.macro_cpi,
+    r.macro_interest_rate,
+    s.dominant_sentiment_label AS sentiment_label,
+    s.average_sentiment_score AS sentiment_score,
+    s.latest_headline AS headline,
+    s.latest_source AS news_source,
+    s.latest_published_date AS news_date,
+    s.headline_count AS news_headline_count,
+    s.positive_count AS news_positive_count,
+    s.negative_count AS news_negative_count,
+    s.neutral_count AS news_neutral_count
+FROM rule_based_signals r
+LEFT JOIN news_sentiment_summary s
+    ON r.asset = s.related_asset
+ORDER BY r.price_date DESC, r.asset;
+"""
+
+latest_headline_query = """
 WITH latest_sentiment AS (
     SELECT
         related_asset,
@@ -114,7 +146,14 @@ LEFT JOIN latest_sentiment s
 ORDER BY r.price_date DESC, r.asset;
 """
 
-df = pd.read_sql(query, engine)
+table_names = inspect(engine).get_table_names()
+
+if "news_sentiment_summary" in table_names:
+    df = pd.read_sql(summary_query, engine)
+    news_source_description = "news_sentiment_summary"
+else:
+    df = pd.read_sql(latest_headline_query, engine)
+    news_source_description = "latest news_sentiment headline"
 
 if df.empty:
     raise ValueError("No rule-based signals found. Run scripts/build_rule_based_signals.py first.")
@@ -146,6 +185,7 @@ latest_df = (
 )
 
 print(f"Built {len(final_df)} combined intelligence rows into combined_intelligence_signals.")
+print(f"News source used: {news_source_description}")
 print()
 print(
     latest_df[

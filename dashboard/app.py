@@ -147,6 +147,24 @@ FROM news_sentiment
 ORDER BY published_at DESC, related_asset;
 """
 
+news_sentiment_summary_query = """
+SELECT
+    related_asset,
+    recent_window_days,
+    headline_count,
+    average_sentiment_score,
+    positive_count,
+    negative_count,
+    neutral_count,
+    dominant_sentiment_label,
+    latest_headline,
+    latest_source,
+    latest_published_date,
+    created_at
+FROM news_sentiment_summary
+ORDER BY related_asset;
+"""
+
 combined_intelligence_query = """
 SELECT
     asset,
@@ -537,6 +555,71 @@ try:
 
 except Exception:
     st.warning("News sentiment table not found yet. Run the news sentiment builder first.")
+
+st.header("News Sentiment Summary")
+
+try:
+    news_sentiment_summary_df = pd.read_sql(news_sentiment_summary_query, engine)
+
+    if news_sentiment_summary_df.empty:
+        st.info("No news sentiment summary available yet. Run scripts/build_news_sentiment_summary.py first.")
+    else:
+        summary_asset = st.selectbox(
+            "Select Sentiment Summary Asset",
+            news_sentiment_summary_df["related_asset"].dropna().unique().tolist()
+        )
+
+        selected_summary_df = news_sentiment_summary_df[
+            news_sentiment_summary_df["related_asset"] == summary_asset
+        ]
+
+        latest_summary = selected_summary_df.iloc[0]
+
+        summary_col_1, summary_col_2, summary_col_3, summary_col_4 = st.columns(4)
+
+        with summary_col_1:
+            st.metric(
+                "Headlines",
+                int(latest_summary["headline_count"])
+            )
+
+        with summary_col_2:
+            st.metric(
+                "Average Score",
+                f"{latest_summary['average_sentiment_score']:.2f}"
+            )
+
+        with summary_col_3:
+            st.metric(
+                "Dominant Sentiment",
+                latest_summary["dominant_sentiment_label"]
+            )
+
+        with summary_col_4:
+            st.metric(
+                "Latest Source",
+                latest_summary["latest_source"]
+            )
+
+        sentiment_mix_col_1, sentiment_mix_col_2, sentiment_mix_col_3 = st.columns(3)
+
+        with sentiment_mix_col_1:
+            st.metric("Positive Headlines", int(latest_summary["positive_count"]))
+
+        with sentiment_mix_col_2:
+            st.metric("Negative Headlines", int(latest_summary["negative_count"]))
+
+        with sentiment_mix_col_3:
+            st.metric("Neutral Headlines", int(latest_summary["neutral_count"]))
+
+        st.subheader("Latest Summary Headline")
+        st.write(latest_summary["latest_headline"])
+
+        st.subheader("All Sentiment Summaries")
+        st.dataframe(news_sentiment_summary_df, width="stretch")
+
+except Exception:
+    st.warning("News sentiment summary table not found yet. Run the news sentiment summary builder first.")
 
 st.header("Combined Market Intelligence")
 
