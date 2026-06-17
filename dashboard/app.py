@@ -196,6 +196,29 @@ FROM model_predictions
 ORDER BY price_date DESC, asset;
 """
 
+live_predictions_query = """
+SELECT
+    asset,
+    prediction_date,
+    prediction_price,
+    predicted_direction,
+    prediction_probability,
+    model_name,
+    status,
+    actual_date,
+    actual_price,
+    actual_direction,
+    prediction_correct,
+    star_rating,
+    model_mood,
+    trust_impact,
+    reflection_message,
+    created_at,
+    updated_at
+FROM live_predictions
+ORDER BY prediction_date DESC, asset;
+"""
+
 model_performance_query = """
 SELECT
     model_name,
@@ -1280,6 +1303,113 @@ def show_ml_predictions():
         st.warning("Model performance table not found yet. Run the model training script first.")
 
 
+def show_live_forward_predictions():
+    st.header("Live Forward Predictions")
+    st.caption(
+        "Creates pending predictions from the latest market setup, then completes them when a newer market price arrives."
+    )
+
+    try:
+        live_predictions_df = read_sql(live_predictions_query)
+
+        if live_predictions_df.empty:
+            st.info("No live predictions available yet. Run scripts/build_live_predictions.py first.")
+            return
+
+        pending_df = live_predictions_df[
+            live_predictions_df["status"] == "PENDING"
+        ].copy()
+        completed_df = live_predictions_df[
+            live_predictions_df["status"] == "COMPLETED"
+        ].copy()
+        latest_prediction_date = live_predictions_df["prediction_date"].max()
+
+        live_col_1, live_col_2, live_col_3 = st.columns(3)
+
+        with live_col_1:
+            st.metric("Pending Predictions", len(pending_df))
+
+        with live_col_2:
+            st.metric("Completed Predictions", len(completed_df))
+
+        with live_col_3:
+            st.metric("Latest Prediction Date", str(latest_prediction_date))
+
+        live_asset = st.selectbox(
+            "Select Live Prediction Asset",
+            live_predictions_df["asset"].dropna().unique().tolist(),
+        )
+
+        selected_live_df = live_predictions_df[
+            live_predictions_df["asset"] == live_asset
+        ]
+
+        latest_live_prediction = selected_live_df.iloc[0]
+        predicted_direction = int(latest_live_prediction["predicted_direction"])
+        predicted_label = "UP" if predicted_direction == 1 else "DOWN"
+
+        selected_col_1, selected_col_2, selected_col_3, selected_col_4 = st.columns(4)
+
+        with selected_col_1:
+            st.metric("Predicted Direction", predicted_label)
+
+        with selected_col_2:
+            st.metric(
+                "Probability",
+                f"{latest_live_prediction['prediction_probability']:.2%}",
+            )
+
+        with selected_col_3:
+            st.metric("Status", latest_live_prediction["status"])
+
+        with selected_col_4:
+            st.metric("Model", latest_live_prediction["model_name"])
+
+        if latest_live_prediction["status"] == "PENDING":
+            st.info("This prediction is waiting for the next available market price.")
+        else:
+            actual_direction = int(latest_live_prediction["actual_direction"])
+            actual_label = "UP" if actual_direction == 1 else "DOWN"
+            was_correct = bool(latest_live_prediction["prediction_correct"])
+
+            result_col_1, result_col_2, result_col_3 = st.columns(3)
+
+            with result_col_1:
+                st.metric("Actual Direction", actual_label)
+
+            with result_col_2:
+                st.metric("Actual Price", f"{latest_live_prediction['actual_price']:,.2f}")
+
+            with result_col_3:
+                st.metric("Result", "CORRECT" if was_correct else "WRONG")
+
+            if was_correct:
+                st.success("The completed live prediction was correct.")
+            else:
+                st.error("The completed live prediction was wrong.")
+
+        st.subheader("Latest Live Reflection")
+        st.write(latest_live_prediction["reflection_message"])
+
+        st.subheader("Pending Predictions")
+        if pending_df.empty:
+            st.info("No pending live predictions right now.")
+        else:
+            st.dataframe(pending_df, width="stretch")
+
+        st.subheader("Completed Predictions")
+        if completed_df.empty:
+            st.info("No completed live predictions yet. They will appear after newer market prices arrive.")
+        else:
+            st.dataframe(completed_df, width="stretch")
+
+        st.subheader("Selected Asset Live History")
+        st.dataframe(selected_live_df, width="stretch")
+
+    except Exception:
+        st.warning("Live prediction table not found yet. Run the live prediction builder first.")
+
+
 def show_model_ratings():
     st.header("Prediction Rating + Model Reflection")
     st.caption("Historical predictions are scored, rated, and translated into model mood, trust impact, and reflection messages.")
@@ -1451,6 +1581,7 @@ with st.sidebar:
             "News Sentiment",
             "Signals & Intelligence",
             "ML Predictions",
+            "Live Forward Predictions",
             "Model Ratings",
             "Backtesting",
             "Guide",
@@ -1486,6 +1617,8 @@ elif page == "Signals & Intelligence":
     show_signals_and_intelligence()
 elif page == "ML Predictions":
     show_ml_predictions()
+elif page == "Live Forward Predictions":
+    show_live_forward_predictions()
 elif page == "Model Ratings":
     show_model_ratings()
 elif page == "Backtesting":
