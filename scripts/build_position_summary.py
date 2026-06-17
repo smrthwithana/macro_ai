@@ -49,12 +49,18 @@ CREATE TABLE IF NOT EXISTS position_summary (
     unrealized_pnl DOUBLE PRECISION,
     unrealized_pnl_percent DOUBLE PRECISION,
     realized_pnl DOUBLE PRECISION,
+    realized_pnl_percent DOUBLE PRECISION,
     current_signal VARCHAR(100),
     signal_category VARCHAR(30),
     signal_source VARCHAR(100),
     suggested_action VARCHAR(100),
     created_at TIMESTAMP
 );
+"""
+
+ALTER_POSITION_SUMMARY_TABLE_QUERY = """
+ALTER TABLE position_summary
+ADD COLUMN IF NOT EXISTS realized_pnl_percent DOUBLE PRECISION;
 """
 
 USER_POSITIONS_QUERY = """
@@ -148,6 +154,7 @@ def ensure_tables():
     with engine.begin() as conn:
         conn.execute(text(CREATE_USER_POSITIONS_TABLE_QUERY))
         conn.execute(text(CREATE_POSITION_SUMMARY_TABLE_QUERY))
+        conn.execute(text(ALTER_POSITION_SUMMARY_TABLE_QUERY))
 
 
 def read_optional(query):
@@ -253,9 +260,11 @@ def build_summary_rows(positions_df, market_df, combined_df, model_df):
         )
 
         realized_pnl = None
+        realized_pnl_percent = None
 
         if status == "CLOSED" and pd.notna(exit_price):
             realized_pnl = (safe_number(exit_price) - entry_price) * quantity
+            realized_pnl_percent = realized_pnl / invested_amount if invested_amount else 0.0
 
         current_signal, signal_category, signal_source = signal_from_row(signal_row)
         action = suggested_action(status, signal_category)
@@ -279,6 +288,7 @@ def build_summary_rows(positions_df, market_df, combined_df, model_df):
                 "unrealized_pnl": unrealized_pnl,
                 "unrealized_pnl_percent": unrealized_pnl_percent,
                 "realized_pnl": realized_pnl,
+                "realized_pnl_percent": realized_pnl_percent,
                 "current_signal": current_signal,
                 "signal_category": signal_category,
                 "signal_source": signal_source,
@@ -355,6 +365,8 @@ def main():
                 "quantity",
                 "unrealized_pnl",
                 "unrealized_pnl_percent",
+                "realized_pnl",
+                "realized_pnl_percent",
                 "current_signal",
                 "suggested_action",
             ]

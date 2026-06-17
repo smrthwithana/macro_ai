@@ -239,6 +239,7 @@ SELECT
     unrealized_pnl,
     unrealized_pnl_percent,
     realized_pnl,
+    realized_pnl_percent,
     current_signal,
     signal_category,
     signal_source,
@@ -288,6 +289,35 @@ VALUES (
     :created_at,
     :updated_at
 );
+"""
+
+update_user_position_query = """
+UPDATE user_positions
+SET
+    asset = :asset,
+    position_type = :position_type,
+    entry_date = :entry_date,
+    entry_price = :entry_price,
+    quantity = :quantity,
+    status = :status,
+    notes = :notes,
+    updated_at = :updated_at
+WHERE id = :id;
+"""
+
+close_user_position_query = """
+UPDATE user_positions
+SET
+    status = 'CLOSED',
+    exit_date = :exit_date,
+    exit_price = :exit_price,
+    updated_at = :updated_at
+WHERE id = :id;
+"""
+
+delete_user_position_query = """
+DELETE FROM user_positions
+WHERE id = :id;
 """
 
 model_performance_query = """
@@ -521,10 +551,60 @@ def add_user_position(asset, position_type, entry_date, entry_price, quantity, s
         )
 
 
+def update_user_position(position_id, asset, position_type, entry_date, entry_price, quantity, status, notes):
+    with engine.begin() as conn:
+        conn.execute(text(create_user_positions_table_query))
+        conn.execute(
+            text(update_user_position_query),
+            {
+                "id": int(position_id),
+                "asset": asset,
+                "position_type": position_type,
+                "entry_date": entry_date,
+                "entry_price": entry_price,
+                "quantity": quantity,
+                "status": status,
+                "notes": notes,
+                "updated_at": datetime.now(),
+            },
+        )
+
+
+def close_user_position(position_id, exit_date, exit_price):
+    with engine.begin() as conn:
+        conn.execute(text(create_user_positions_table_query))
+        conn.execute(
+            text(close_user_position_query),
+            {
+                "id": int(position_id),
+                "exit_date": exit_date,
+                "exit_price": exit_price,
+                "updated_at": datetime.now(),
+            },
+        )
+
+
+def delete_user_position(position_id):
+    with engine.begin() as conn:
+        conn.execute(text(create_user_positions_table_query))
+        conn.execute(
+            text(delete_user_position_query),
+            {
+                "id": int(position_id),
+            },
+        )
+
+
 def rebuild_position_summary():
     from scripts.build_position_summary import main as build_position_summary
 
     build_position_summary()
+
+
+def refresh_positions_after_action(message):
+    rebuild_position_summary()
+    st.session_state["positions_message"] = message
+    st.rerun()
 
 
 def latest_rows_by_asset(df, asset_column="asset"):
@@ -1521,6 +1601,13 @@ def show_my_positions():
         "A position means something you bought or are tracking. Entry price is the price you bought at. "
         "P&L means profit and loss."
     )
+    st.caption(
+        "Closing a position means recording the sell/exit price. Realized P&L means profit or loss "
+        "after closing the trade. Deleting removes the record completely."
+    )
+
+    if "positions_message" in st.session_state:
+        st.success(st.session_state.pop("positions_message"))
 
     try:
         ensure_user_positions_table()
@@ -1583,8 +1670,7 @@ def show_my_positions():
                     status,
                     notes,
                 )
-                rebuild_position_summary()
-                st.success(f"Added {asset} to My Positions.")
+                refresh_positions_after_action(f"Added {asset} to My Positions.")
 
     try:
         position_summary_df = read_sql(position_summary_query)
@@ -1599,6 +1685,199 @@ def show_my_positions():
     if position_summary_df.empty:
         st.info("No positions or watchlist items yet. Add your first item above.")
         return
+
+    def position_label(row):
+        return (
+            f"{int(row['user_position_id'])} | {row['asset']} | "
+            f"{row['status']} | {row['position_type']}"
+        )
+
+    def date_value(value):
+        if pd.isna(value):
+            return datetime.now().date()
+
+        return pd.to_datetime(value).date()
+
+    def input_number_value(value):
+        if pd.isna(value):
+            return 0.0
+
+        return float(value)
+
+    position_summary_df = position_summary_df.copy()
+    position_summary_df["position_label"] = position_summary_df.apply(position_label, axis=1)
+
+    st.subheader("Manage Existing Positions")
+    st.caption(
+        "Use these controls after a position is created: edit details, close an open trade, or delete a test/watch record."
+    )
+
+    edit_tab, close_tab, delete_tab = st.tabs(
+        [
+            "Edit Position",
+            "Close Position",
+            "Delete Position",
+        ]
+    )
+
+    with edit_tab:
+        edit_label = st.selectbox(
+            "Select Position to Edit",
+            position_summary_df["position_label"].tolist(),
+            key="edit_position_select",
+        )
+        edit_row = position_summary_df[
+            position_summary_df["position_label"] == edit_label
+        ].iloc[0]
+
+        with st.form("edit_position_form"):
+            edit_col_1, edit_col_2, edit_col_3 = st.columns(3)
+
+            with edit_col_1:
+                edit_asset = st.text_input(
+                    "Edit Asset",
+                    value=str(edit_row["asset"]),
+                ).upper().strip()
+                edit_position_type = st.radio(
+                    "Edit Position Type",
+                    ["BUY", "WATCH"],
+                    index=0 if edit_row["position_type"] == "BUY" else 1,
+                    horizontal=True,
+                )
+
+            with edit_col_2:
+                edit_entry_date = st.date_input(
+                    "Edit Entry Date",
+                    value=date_value(edit_row["entry_date"]),
+                )
+                edit_entry_price = st.number_input(
+                    "Edit Entry Price",
+                    min_value=0.0,
+                    value=input_number_value(edit_row["entry_price"]),
+                    step=0.01,
+                    format="%.4f",
+                )
+
+            with edit_col_3:
+                edit_quantity = st.number_input(
+                    "Edit Quantity",
+                    min_value=0.0,
+                    value=input_number_value(edit_row["quantity"]),
+                    step=1.0,
+                    format="%.6f",
+                )
+                status_options = ["OPEN", "WATCHING", "CLOSED"]
+                edit_status = st.radio(
+                    "Edit Status",
+                    status_options,
+                    index=status_options.index(edit_row["status"])
+                    if edit_row["status"] in status_options
+                    else 0,
+                    horizontal=True,
+                )
+
+            edit_notes = st.text_area(
+                "Edit Notes",
+                value=str(edit_row["notes"]) if pd.notna(edit_row["notes"]) else "",
+            )
+            edit_submitted = st.form_submit_button("Save Position Changes")
+
+            if edit_submitted:
+                if not edit_asset:
+                    st.error("Please enter an asset symbol.")
+                elif edit_status == "OPEN" and (edit_entry_price <= 0 or edit_quantity <= 0):
+                    st.error("Open positions need an entry price and quantity above zero.")
+                else:
+                    update_user_position(
+                        edit_row["user_position_id"],
+                        edit_asset,
+                        edit_position_type,
+                        edit_entry_date,
+                        edit_entry_price,
+                        edit_quantity,
+                        edit_status,
+                        edit_notes,
+                    )
+                    refresh_positions_after_action(f"Updated position {int(edit_row['user_position_id'])}.")
+
+    with close_tab:
+        open_for_close_df = position_summary_df[
+            position_summary_df["status"] == "OPEN"
+        ].copy()
+
+        if open_for_close_df.empty:
+            st.info("No open positions are available to close.")
+        else:
+            close_label = st.selectbox(
+                "Select OPEN Position to Close",
+                open_for_close_df["position_label"].tolist(),
+                key="close_position_select",
+            )
+            close_row = open_for_close_df[
+                open_for_close_df["position_label"] == close_label
+            ].iloc[0]
+
+            st.info("Closing a position means recording the sell/exit price.")
+
+            with st.form("close_position_form"):
+                close_col_1, close_col_2 = st.columns(2)
+
+                with close_col_1:
+                    exit_date = st.date_input(
+                        "Exit Date",
+                        value=datetime.now().date(),
+                    )
+
+                with close_col_2:
+                    default_exit_price = input_number_value(close_row["current_price"])
+                    exit_price = st.number_input(
+                        "Exit Price",
+                        min_value=0.0,
+                        value=default_exit_price,
+                        step=0.01,
+                        format="%.4f",
+                    )
+
+                close_submitted = st.form_submit_button("Close Position")
+
+                if close_submitted:
+                    if exit_price <= 0:
+                        st.error("Exit price must be above zero.")
+                    else:
+                        close_user_position(
+                            close_row["user_position_id"],
+                            exit_date,
+                            exit_price,
+                        )
+                        refresh_positions_after_action(
+                            f"Closed {close_row['asset']} at {exit_price:,.2f}."
+                        )
+
+    with delete_tab:
+        st.warning("Deleting removes the record completely. This is useful for removing test records.")
+        delete_label = st.selectbox(
+            "Select Position to Delete",
+            position_summary_df["position_label"].tolist(),
+            key="delete_position_select",
+        )
+        delete_row = position_summary_df[
+            position_summary_df["position_label"] == delete_label
+        ].iloc[0]
+
+        with st.form("delete_position_form"):
+            confirm_delete = st.checkbox(
+                f"I understand this will permanently delete {delete_row['asset']} position {int(delete_row['user_position_id'])}."
+            )
+            delete_submitted = st.form_submit_button("Delete Position")
+
+            if delete_submitted:
+                if not confirm_delete:
+                    st.error("Please confirm deletion before deleting this record.")
+                else:
+                    delete_user_position(delete_row["user_position_id"])
+                    refresh_positions_after_action(
+                        f"Deleted position {int(delete_row['user_position_id'])}."
+                    )
 
     open_positions_df = position_summary_df[
         position_summary_df["status"] == "OPEN"
@@ -1718,10 +1997,15 @@ def show_my_positions():
             "exit_price",
             "quantity",
             "realized_pnl",
+            "realized_pnl_percent",
             "suggested_action",
             "notes",
         ]
-        st.dataframe(closed_positions_df[closed_display_columns], width="stretch")
+        closed_display_df = closed_positions_df[closed_display_columns].copy()
+        closed_display_df["realized_pnl_percent"] = closed_display_df["realized_pnl_percent"].apply(
+            lambda value: f"{value:.2%}" if pd.notna(value) else "N/A"
+        )
+        st.dataframe(closed_display_df, width="stretch")
 
 
 def show_model_ratings():
