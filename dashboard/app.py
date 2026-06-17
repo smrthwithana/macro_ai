@@ -7,6 +7,7 @@ sys.path.append(str(ROOT_DIR))
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import text
 from config.database import engine
 
 
@@ -219,6 +220,76 @@ FROM live_predictions
 ORDER BY prediction_date DESC, asset;
 """
 
+position_summary_query = """
+SELECT
+    user_position_id,
+    asset,
+    position_type,
+    entry_date,
+    entry_price,
+    quantity,
+    status,
+    exit_date,
+    exit_price,
+    notes,
+    current_price,
+    price_timestamp,
+    invested_amount,
+    current_value,
+    unrealized_pnl,
+    unrealized_pnl_percent,
+    realized_pnl,
+    current_signal,
+    signal_category,
+    signal_source,
+    suggested_action,
+    created_at
+FROM position_summary
+ORDER BY status, asset, user_position_id;
+"""
+
+create_user_positions_table_query = """
+CREATE TABLE IF NOT EXISTS user_positions (
+    id SERIAL PRIMARY KEY,
+    asset VARCHAR(50) NOT NULL,
+    position_type VARCHAR(20),
+    entry_date DATE,
+    entry_price DOUBLE PRECISION,
+    quantity DOUBLE PRECISION,
+    status VARCHAR(20),
+    exit_date DATE,
+    exit_price DOUBLE PRECISION,
+    notes TEXT,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
+);
+"""
+
+insert_user_position_query = """
+INSERT INTO user_positions (
+    asset,
+    position_type,
+    entry_date,
+    entry_price,
+    quantity,
+    status,
+    notes,
+    created_at,
+    updated_at
+)
+VALUES (
+    :asset,
+    :position_type,
+    :entry_date,
+    :entry_price,
+    :quantity,
+    :status,
+    :notes,
+    :created_at,
+    :updated_at
+);
+"""
+
 model_performance_query = """
 SELECT
     model_name,
@@ -422,6 +493,38 @@ def read_optional_sql(query, unavailable_message):
     except Exception:
         st.info(unavailable_message)
         return pd.DataFrame()
+
+
+def ensure_user_positions_table():
+    with engine.begin() as conn:
+        conn.execute(text(create_user_positions_table_query))
+
+
+def add_user_position(asset, position_type, entry_date, entry_price, quantity, status, notes):
+    now = datetime.now()
+
+    with engine.begin() as conn:
+        conn.execute(text(create_user_positions_table_query))
+        conn.execute(
+            text(insert_user_position_query),
+            {
+                "asset": asset,
+                "position_type": position_type,
+                "entry_date": entry_date,
+                "entry_price": entry_price,
+                "quantity": quantity,
+                "status": status,
+                "notes": notes,
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+
+
+def rebuild_position_summary():
+    from scripts.build_position_summary import main as build_position_summary
+
+    build_position_summary()
 
 
 def latest_rows_by_asset(df, asset_column="asset"):
@@ -694,6 +797,7 @@ def show_dashboard_guide():
         - **Backtest return** simulates a simple long/short strategy based on predicted direction.
         - **Win rate** shows how often the simulated strategy produced a positive trade result.
         - **Model comparison** shows which ML model performed best on the time-based test split.
+        - **My Positions** lets you record assets you bought or are watching, then see current P&L and suggested action.
         """
     )
 
@@ -1410,6 +1514,216 @@ def show_live_forward_predictions():
         st.warning("Live prediction table not found yet. Run the live prediction builder first.")
 
 
+def show_my_positions():
+    st.header("My Positions")
+    st.caption("Track assets you bought or are watching, then compare them with current market signals.")
+    st.info(
+        "A position means something you bought or are tracking. Entry price is the price you bought at. "
+        "P&L means profit and loss."
+    )
+
+    try:
+        ensure_user_positions_table()
+    except Exception:
+        st.warning("Could not prepare the user_positions table. Check the database connection.")
+        return
+
+    with st.form("add_position_form"):
+        st.subheader("Add Position or Watch Item")
+
+        form_col_1, form_col_2, form_col_3 = st.columns(3)
+
+        with form_col_1:
+            asset = st.text_input("Asset", value="SP500").upper().strip()
+            position_type = st.radio(
+                "Position Type",
+                ["BUY", "WATCH"],
+                horizontal=True,
+            )
+
+        with form_col_2:
+            entry_date = st.date_input("Entry Date", value=datetime.now().date())
+            entry_price = st.number_input(
+                "Entry Price",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.4f",
+            )
+
+        with form_col_3:
+            quantity = st.number_input(
+                "Quantity",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                format="%.6f",
+            )
+            status = st.radio(
+                "Status",
+                ["OPEN", "WATCHING", "CLOSED"],
+                horizontal=True,
+            )
+
+        notes = st.text_area("Notes", placeholder="Why are you tracking this asset?")
+        submitted = st.form_submit_button("Add Position / Watch Item")
+
+        if submitted:
+            if not asset:
+                st.error("Please enter an asset symbol.")
+            elif status == "OPEN" and (entry_price <= 0 or quantity <= 0):
+                st.error("Open positions need an entry price and quantity above zero.")
+            else:
+                add_user_position(
+                    asset,
+                    position_type,
+                    entry_date,
+                    entry_price,
+                    quantity,
+                    status,
+                    notes,
+                )
+                rebuild_position_summary()
+                st.success(f"Added {asset} to My Positions.")
+
+    try:
+        position_summary_df = read_sql(position_summary_query)
+    except Exception:
+        try:
+            rebuild_position_summary()
+            position_summary_df = read_sql(position_summary_query)
+        except Exception:
+            st.info("No position summary available yet. Run scripts/build_position_summary.py first.")
+            return
+
+    if position_summary_df.empty:
+        st.info("No positions or watchlist items yet. Add your first item above.")
+        return
+
+    open_positions_df = position_summary_df[
+        position_summary_df["status"] == "OPEN"
+    ].copy()
+    watchlist_df = position_summary_df[
+        position_summary_df["status"] == "WATCHING"
+    ].copy()
+    closed_positions_df = position_summary_df[
+        position_summary_df["status"] == "CLOSED"
+    ].copy()
+
+    total_invested = open_positions_df["invested_amount"].sum()
+    current_value = open_positions_df["current_value"].sum()
+    total_unrealized_pnl = open_positions_df["unrealized_pnl"].sum()
+    total_unrealized_pnl_percent = (
+        total_unrealized_pnl / total_invested
+        if total_invested
+        else 0.0
+    )
+
+    st.subheader("Portfolio Metrics")
+    metric_col_1, metric_col_2, metric_col_3, metric_col_4, metric_col_5, metric_col_6 = st.columns(6)
+
+    with metric_col_1:
+        st.metric("Total Invested", f"{total_invested:,.2f}")
+
+    with metric_col_2:
+        st.metric("Current Value", f"{current_value:,.2f}")
+
+    with metric_col_3:
+        st.metric(
+            "Unrealized P&L",
+            f"{total_unrealized_pnl:,.2f}",
+            f"{total_unrealized_pnl_percent:.2%}",
+        )
+
+    with metric_col_4:
+        st.metric("Unrealized P&L %", f"{total_unrealized_pnl_percent:.2%}")
+
+    with metric_col_5:
+        st.metric("Open Positions", len(open_positions_df))
+
+    with metric_col_6:
+        st.metric("Watchlist Items", len(watchlist_df))
+
+    display_columns = [
+        "asset",
+        "entry_date",
+        "entry_price",
+        "current_price",
+        "quantity",
+        "invested_amount",
+        "current_value",
+        "unrealized_pnl",
+        "unrealized_pnl_percent",
+        "current_signal",
+        "suggested_action",
+        "notes",
+    ]
+
+    def format_display_df(df):
+        display_df = df[display_columns].copy()
+        display_df["unrealized_pnl_percent"] = display_df["unrealized_pnl_percent"].apply(
+            lambda value: f"{value:.2%}" if pd.notna(value) else "N/A"
+        )
+        return display_df
+
+    def show_action_labels(df):
+        for _, row in df.iterrows():
+            action = row["suggested_action"]
+            asset_name = row["asset"]
+            pnl = row["unrealized_pnl"]
+            signal = row["current_signal"]
+            message = f"{asset_name}: {action} | P&L {pnl:,.2f} | {signal}"
+
+            if action in ["HOLD / CONTINUE", "WATCH FOR BUY OPPORTUNITY"]:
+                st.success(message)
+            elif action in ["WAIT", "HOLD CAREFULLY", "POSITION CLOSED"]:
+                st.warning(message)
+            elif action in ["AVOID FOR NOW", "REVIEW POSITION / RISK WARNING"] or pnl < 0:
+                st.error(message)
+            else:
+                st.info(message)
+
+    st.subheader("Open Positions")
+    if open_positions_df.empty:
+        st.info("No open positions yet.")
+    else:
+        show_action_labels(open_positions_df)
+        st.dataframe(format_display_df(open_positions_df), width="stretch")
+
+    st.subheader("Watchlist")
+    if watchlist_df.empty:
+        st.info("No watchlist items yet.")
+    else:
+        show_action_labels(watchlist_df)
+        watch_display_columns = [
+            "asset",
+            "entry_date",
+            "entry_price",
+            "current_price",
+            "current_signal",
+            "suggested_action",
+            "notes",
+        ]
+        st.dataframe(watchlist_df[watch_display_columns], width="stretch")
+
+    st.subheader("Closed Positions")
+    if closed_positions_df.empty:
+        st.info("No closed positions yet.")
+    else:
+        closed_display_columns = [
+            "asset",
+            "entry_date",
+            "entry_price",
+            "exit_date",
+            "exit_price",
+            "quantity",
+            "realized_pnl",
+            "suggested_action",
+            "notes",
+        ]
+        st.dataframe(closed_positions_df[closed_display_columns], width="stretch")
+
+
 def show_model_ratings():
     st.header("Prediction Rating + Model Reflection")
     st.caption("Historical predictions are scored, rated, and translated into model mood, trust impact, and reflection messages.")
@@ -1582,6 +1896,7 @@ with st.sidebar:
             "Signals & Intelligence",
             "ML Predictions",
             "Live Forward Predictions",
+            "My Positions",
             "Model Ratings",
             "Backtesting",
             "Guide",
@@ -1619,6 +1934,8 @@ elif page == "ML Predictions":
     show_ml_predictions()
 elif page == "Live Forward Predictions":
     show_live_forward_predictions()
+elif page == "My Positions":
+    show_my_positions()
 elif page == "Model Ratings":
     show_model_ratings()
 elif page == "Backtesting":

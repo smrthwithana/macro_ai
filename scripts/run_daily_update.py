@@ -16,6 +16,7 @@ tasks = [
     ("Model dataset build", "scripts.build_model_dataset"),
     ("Direction model comparison training", "scripts.train_direction_model"),
     ("Live forward predictions build", "scripts.build_live_predictions"),
+    ("Position summary build", "scripts.build_position_summary"),
     ("Prediction ratings build", "scripts.build_prediction_ratings"),
     ("Backtest results build", "scripts.build_backtest_results")
 ]
